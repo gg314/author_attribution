@@ -1,0 +1,9 @@
+[package]
+name = "author_attribution"
+version = "0.1.0"
+authors = ["gg314 <54562746+gg314@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
