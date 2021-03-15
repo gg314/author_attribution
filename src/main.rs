@@ -2,8 +2,14 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::fmt;
+use rand::Rng;
+use regex::Regex;
+
 
 mod nlp;
+mod svm;
+mod perceptron;
+mod models;
 
 #[derive(Debug)]
 struct CorpusData {
@@ -62,25 +68,6 @@ impl fmt::Display for CorpusStats {
     }
 }
 
-
-fn dot(v1: &Vec<i16>, v2: &Vec<i16>) -> i16 {
-    return v1.iter().zip(v2.iter()).map(|(x, y)| x * y).sum();
-}
-
-fn norm(vin: &Vec<i16>) -> Vec<f64> {
-    let mut sum = 0;
-    for i in vin {
-        sum += i*i;
-    }
-
-    let sum = (sum as f64).sqrt();
-    let mut vout = Vec::new();
-    for i in vin {
-        vout.push( *i as f64 / sum )
-    }
-
-    return vout
-}
 
 
 fn statistics(corpus_data: CorpusData) -> CorpusStats {
@@ -207,7 +194,7 @@ fn readit() -> CorpusData {
     let mut count_conjunctions = 0;
     let mut count_commas = 0;
 
-    let file = File::open(filename).expect("no such file");
+    let file = File::open(filename).expect("No such file");
     let buf = BufReader::new(file);
     let text: Vec<String> = buf.lines().map(|l| l.expect("Could not parse line")).collect();
     let mut words_per_sentence: Vec<i16> = Vec::new();
@@ -269,21 +256,118 @@ fn readit() -> CorpusData {
     }
 }
 
+
+
+
+
+fn read_iris_data() -> Vec<models::Iris> {
+    // let filename = "data/test.txt";
+    let filename = "data/iris/iris.csv";
+
+    let file = File::open(filename).expect("No such file");
+    let buf = BufReader::new(file);
+    let text: Vec<String> = buf.lines().map(|l| l.expect("Could not parse line")).collect();
+    
+    let mut collection: Vec<models::Iris> = Vec::new();
+
+    let re = Regex::new(r"^(.*),(.*),(.*),(.*),(.*)$").unwrap();
+
+    for line in text {
+
+        match re.captures(&line[..]) {
+            Some(cap) => {
+                let groups = (cap.get(1), cap.get(2), cap.get(3), cap.get(4), cap.get(5));
+                match groups {
+                    (Some(sl), Some(sw), Some(pl), Some(pw), Some(n)) => {
+                        let new_iris = models::Iris {
+                            sepal_length: sl.as_str().parse::<f64>().unwrap(),
+                            sepal_width: sw.as_str().parse::<f64>().unwrap(),
+                            petal_length: pl.as_str().parse::<f64>().unwrap(),
+                            petal_width: pw.as_str().parse::<f64>().unwrap(),
+                            class: String::from(n.as_str())
+                        };
+
+                        collection.push(new_iris);
+                    },
+                    _ => ()
+                };
+            },
+            _ => ()
+        };
+    }
+
+    collection
+}
+
+
+fn iris_perceptron(irises: &Vec<models::Iris>, iris_species: &str, testing_fraction: f64) {
+    let mut training_set: Vec<perceptron::Sample> = Vec::new();
+    let mut testing_set: Vec<perceptron::Sample> = Vec::new();
+
+    let total_count = irises.len();
+    let testing_count = (testing_fraction * total_count as f64).round() as usize;
+    let mut rng = rand::thread_rng();
+    let special_set = rand::seq::index::sample(&mut rng, total_count, testing_count).into_vec();
+
+    println!("\nTesting iris perceptron with *{}* (training set size: {}, testing set size: {})", iris_species, total_count-testing_count, testing_count);
+
+    for (i, iris) in (&irises).iter().enumerate() {
+        if special_set.contains(&i) {
+            if iris.class == iris_species {
+                testing_set.push(perceptron::Sample { values: vec![1.0, iris.sepal_length, iris.sepal_width, iris.petal_length, iris.petal_width], class: 1} )
+            } else {
+                testing_set.push(perceptron::Sample { values: vec![1.0, iris.sepal_length, iris.sepal_width, iris.petal_length, iris.petal_width], class: 0} )
+            }
+        } else {
+            if iris.class == iris_species {
+                training_set.push(perceptron::Sample { values: vec![1.0, iris.sepal_length, iris.sepal_width, iris.petal_length, iris.petal_width], class: 1} )
+            } else {
+                training_set.push(perceptron::Sample { values: vec![1.0, iris.sepal_length, iris.sepal_width, iris.petal_length, iris.petal_width], class: 0} )
+            }
+        }
+    }
+
+    let model = perceptron::train(&training_set);
+    perceptron::test(model, &testing_set);
+}
+
+
+
+
 fn main() {
+    let mut rng = rand::thread_rng();
 
+    let irises = read_iris_data();
+    for iris_specices in ["Iris-setosa", "Iris-versicolor", "Iris-virginica"].iter() {
+        iris_perceptron(&irises, iris_specices, 0.1333);
+    }
 
+    
+    let mut defoe_vecs = Vec::new();
+    // let mut other_vecs = Vec::new();
+    for _n in 0..15 {
+        defoe_vecs.push(perceptron::Sample { values: vec![1.0, rng.gen_range(0.6..1.0), rng.gen_range(0.0..0.2)], class: 1} );
+        defoe_vecs.push(perceptron::Sample { values: vec![1.0, rng.gen_range(0.0..0.4), rng.gen_range(0.8..1.0)], class: 0} );
+        defoe_vecs.push(perceptron::Sample { values: vec![1.0, rng.gen_range(0.4..0.7), rng.gen_range(0.7..1.0)], class: 0} );
+    }
+    
+    
+    // vec![vec![0.75, 0.10], vec![0.88, 0.05], vec![0.86, 0.03], vec![0.84, 0.11], vec![0.92, 0.04]]; // = +1
+    // let mut other_vecs = vec![vec![0.05, 0.91], vec![0.09, 0.86], vec![0.15, 0.97], vec![0.10, 0.76], vec![0.00, 0.99]]; // = -1
+    
+    perceptron::train(&defoe_vecs);
+    // svm::train(defoe_vecs, other_vecs);
 
-    let v1 = vec![1, 2, 2, 4, 5];
-    let v2 = vec![1, 1, 0, 1, 1];
-    let v3 = dot(&v1, &v2);
-    let v4 = norm(&v1);
-    println!("dot prod is {:?}", v3);
-    println!("the norm is {:?}", v4);
+    // let v3 = dot(&v1, &v2);
+    // let v4 = norm(&v1);
+    // println!("dot prod is {:?}", v3);
+    // println!("the norm is {:?}", v4);
 
+    /*
     let pyrates_data = readit();
     let pyrates_stats = statistics(pyrates_data);
     println!("{:}", pyrates_stats);
-
+*/
 
     // println!("{:?}", word_frequency);
 }
