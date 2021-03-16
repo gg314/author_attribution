@@ -12,15 +12,15 @@ pub struct Sample {
 
 impl fmt::Display for Sample {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{{");
+        write!(f, "{{")?;
         let mut n = 0;
         for v in &self.values {
             if n == 0 {
                 ();
-            } else if (n == 1) {
-                write!(f, "{}", v);
+            } else if n == 1 {
+                write!(f, "{}", v)?;
             } else {
-                write!(f, ", {}", v);
+                write!(f, ", {}", v)?;
             }
             n += 1;
         };
@@ -45,21 +45,6 @@ where
     return v1.iter().zip(v2.iter()).map(|(x, y)| *x + *y).collect();
 }
 
-
-fn norm(vin: &Vec<i16>) -> Vec<f64> {
-    let mut sum = 0;
-    for i in vin {
-        sum += i*i;
-    }
-
-    let sum = (sum as f64).sqrt();
-    let mut vout = Vec::new();
-    for i in vin {
-        vout.push( *i as f64 / sum )
-    }
-
-    return vout
-}
 
 fn update_weights(weights: &Vec<f64>, rate: f64, xj: &Sample, yj: i8) -> Vec<f64> {
 
@@ -111,9 +96,10 @@ pub fn train(samples: &Vec<Sample>) -> Vec<f64> {
     println!("\n");
     */
 
+    let mut errors = 0;
     let mut epoch = 1;
     while epoch < max_epochs {
-        let mut errors = 0;
+        errors = 0;
         for s in samples {
             let yj = f(&weights, &s);
             weights = update_weights(&weights, rate, &s, yj);
@@ -130,7 +116,7 @@ pub fn train(samples: &Vec<Sample>) -> Vec<f64> {
 
     if epoch >= max_epochs {
         println!("Perceptron did not converge! Data may not be linearly-separable, but you can try increasing `max_epochs`, training rate, etc.");
-        println!("Perceptron weights after {} epochs: {:?}", epoch, weights);
+        println!("Perceptron weights after {} epochs: {:?} ({}/{} errors)", epoch, weights, errors, samples.len());
     }
 
     return weights
@@ -150,4 +136,13 @@ pub fn test(weights: Vec<f64>, samples: &Vec<Sample>) {
     let percentage = format!("{:.1}%", 100.0* successes as f64 / total as f64);
     println!("Success rate: {}/{} ({})", successes, total, percentage)
     
+}
+
+
+pub fn classify(weights: Vec<f64>, samples: &Vec<Sample>) -> Vec<i8> {
+    let mut results = Vec::new();
+    for s in samples {
+        results.push(f(&weights, &s));
+    }
+    return results;
 }

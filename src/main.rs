@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::fmt;
 use rand::Rng;
 use regex::Regex;
-
+use glob::glob;
 
 mod nlp;
 mod svm;
@@ -19,7 +19,8 @@ struct CorpusData {
     words_per_sentence: Vec<i16>,
     pronouns_per_sentence: Vec<i16>,
     conjunctions_per_sentence: Vec<i16>,
-    word_frequencies: HashMap<String, i16>
+    word_frequencies: HashMap<String, i16>,
+    class: u8
 }
 
 #[derive(Debug)]
@@ -35,6 +36,7 @@ struct CorpusStats {
     word_length_dist: [f64; 26],
     pronouns_per_sentence_dist: [f64; 20],
     conjunctions_per_sentence_dist: [f64; 20],
+    class: u8
 }
 
 impl fmt::Display for CorpusStats {
@@ -57,7 +59,7 @@ impl fmt::Display for CorpusStats {
         }
         
         write!(f, "=====================================================================================================================\n")?;
-        write!(f, "|  Dataset: {}\n", self.name)?;
+        write!(f, "|  Dataset: {} ({} words in {} sentences)\n", self.name, self.total_words, self.total_sentences)?;
         write!(f, "=====================================================================================================================\n")?;
         write!(f, "|  unique words: {}   |   hapax legomena: {}   |   dis legomena: {}   |   commas: {} \n", self.unique_words, self.hapax_legomena, self.dis_legomena, self.total_commas)?;
         write!(f, "|  word lengths:              {} \n", word_length_string)?;
@@ -137,16 +139,6 @@ fn statistics(corpus_data: CorpusData) -> CorpusStats {
         }
     }
     
-    println!("total_words is {:?}", total_words);
-    println!("hapax_legomena is {:?}", hapax_legomena);
-    println!("dis_legomena is {:?}", dis_legomena);
-    println!("unique_words is {:?}", unique_words);
-    println!("sentence length dist is {:?}", sentence_length_dist);
-    println!("word length dist is {:?}", word_length_dist);
-    println!("pronoun dist is {:?}", pronouns_per_sentence_dist);
-    println!("conjunction dist is {:?}", conjunctions_per_sentence_dist);
-
-    
     let mut sentence_length_dist_f64: [f64; 36] = [0.0; 36];
     let mut word_length_dist_f64: [f64; 26] = [0.0; 26];
     let mut pronouns_per_sentence_dist_f64: [f64; 20] = [0.0; 20];
@@ -180,13 +172,15 @@ fn statistics(corpus_data: CorpusData) -> CorpusStats {
         word_length_dist: word_length_dist_f64,
         pronouns_per_sentence_dist: pronouns_per_sentence_dist_f64,
         conjunctions_per_sentence_dist: conjunctions_per_sentence_dist_f64,
+        class: corpus_data.class
     }
 }
 
 
-fn readit() -> CorpusData {
-    // let filename = "data/test.txt";
-    let filename = "data/corpus/unknown_pyrates_ii.txt";
+fn read_book(fname: &str, class: u8) -> CorpusData {
+    // let fname = "data/test.txt";
+    println!("\nImporting file: {}", fname);
+    let filename = format!("data/corpus/{}", fname);
 
     let mut total_sentences = 0;
     let mut count_words = 0;
@@ -207,7 +201,7 @@ fn readit() -> CorpusData {
     for line in text {
         for word in line.split_whitespace() {
             let mut keyword = word.to_lowercase().to_string();
-            keyword = keyword.replace(&['(', ')', '\"', ';', ':', '\'', '_'][..], "");
+            keyword = keyword.replace(&['(', ')', '§', '*', '\"', '“', '”', ';', ':', '\'', '_'][..], "");
             count_words += 1;
             test_sentence.push_str(&keyword);
             test_sentence.push_str(" ");
@@ -246,13 +240,14 @@ fn readit() -> CorpusData {
     }
     
     CorpusData {
-        name: String::from("pyrates"),
+        name: String::from(fname),
         total_sentences: total_sentences,
         total_commas: count_commas,
         words_per_sentence: words_per_sentence,
         pronouns_per_sentence: pronouns_per_sentence,
         conjunctions_per_sentence: conjunctions_per_sentence,
-        word_frequencies: map
+        word_frequencies: map,
+        class: class
     }
 }
 
@@ -333,6 +328,66 @@ fn iris_perceptron(irises: &Vec<models::Iris>, iris_species: &str, testing_fract
 
 
 
+fn corpus_perceptron(pos: &Vec<CorpusStats>, neg: &Vec<CorpusStats>, unknown: &Vec<CorpusStats>) {
+    let mut training_set: Vec<perceptron::Sample> = Vec::new();
+    let mut classify_set: Vec<perceptron::Sample> = Vec::new();
+
+    println!("\nTraining corpus perceptron with {} positive samples, {} negative samples.", pos.len(), neg.len());
+    
+    // total_sentences: i16,
+    // total_commas: i32,
+    // total_words: i32,
+    // hapax_legomena: i32,
+    // dis_legomena: i32,
+    // unique_words: i32,
+    // sentence_length_dist: [f64; 36],
+    // word_length_dist: [f64; 26],
+    // pronouns_per_sentence_dist: [f64; 20],
+    // conjunctions_per_sentence_dist: [f64; 20],
+
+    for n in neg {
+        let sample_vec = vec![1.0,
+                              n.total_commas as f64 / n.total_sentences as f64,
+                              n.hapax_legomena as f64 / n.total_words as f64,
+                              n.dis_legomena as f64 / n.total_words as f64,
+                              n.unique_words as f64 / n.total_words as f64,
+                              ];
+        training_set.push(perceptron::Sample { class: 0, values: sample_vec } )
+    }
+
+    
+    for p in pos {
+        let sample_vec = vec![1.0,
+                              p.total_commas as f64 / p.total_sentences as f64,
+                              p.hapax_legomena as f64 / p.total_words as f64,
+                              p.dis_legomena as f64 / p.total_words as f64,
+                              p.unique_words as f64 / p.total_words as f64,
+                              ];
+        training_set.push(perceptron::Sample { class: 1, values: sample_vec } )
+    }
+    
+    for u in unknown {
+        let sample_vec = vec![1.0,
+                              u.total_commas as f64 / u.total_sentences as f64,
+                              u.hapax_legomena as f64 / u.total_words as f64,
+                              u.dis_legomena as f64 / u.total_words as f64,
+                              u.unique_words as f64 / u.total_words as f64,
+                              ];
+        classify_set.push(perceptron::Sample { class: 1, values: sample_vec } )
+    }
+
+    let model = perceptron::train(&training_set);
+    let classifications = perceptron::classify(model, &classify_set);
+
+    for (i, (r, c)) in classifications.iter().zip(unknown.iter()).enumerate() {
+        println!("{}: Sorted {} for {}", i, r, c.name)
+    }
+    // perceptron::test(model, &testing_set);
+}
+
+
+
+
 
 fn main() {
     let mut rng = rand::thread_rng();
@@ -343,19 +398,9 @@ fn main() {
     }
 
     
-    let mut defoe_vecs = Vec::new();
-    // let mut other_vecs = Vec::new();
-    for _n in 0..15 {
-        defoe_vecs.push(perceptron::Sample { values: vec![1.0, rng.gen_range(0.6..1.0), rng.gen_range(0.0..0.2)], class: 1} );
-        defoe_vecs.push(perceptron::Sample { values: vec![1.0, rng.gen_range(0.0..0.4), rng.gen_range(0.8..1.0)], class: 0} );
-        defoe_vecs.push(perceptron::Sample { values: vec![1.0, rng.gen_range(0.4..0.7), rng.gen_range(0.7..1.0)], class: 0} );
-    }
     
-    
-    // vec![vec![0.75, 0.10], vec![0.88, 0.05], vec![0.86, 0.03], vec![0.84, 0.11], vec![0.92, 0.04]]; // = +1
     // let mut other_vecs = vec![vec![0.05, 0.91], vec![0.09, 0.86], vec![0.15, 0.97], vec![0.10, 0.76], vec![0.00, 0.99]]; // = -1
     
-    perceptron::train(&defoe_vecs);
     // svm::train(defoe_vecs, other_vecs);
 
     // let v3 = dot(&v1, &v2);
@@ -363,11 +408,44 @@ fn main() {
     // println!("dot prod is {:?}", v3);
     // println!("the norm is {:?}", v4);
 
-    /*
-    let pyrates_data = readit();
-    let pyrates_stats = statistics(pyrates_data);
-    println!("{:}", pyrates_stats);
-*/
+
+    let mut defoe_vecs = Vec::new();
+    for entry in glob("data/corpus/defoe_*.txt").expect("Failed to read glob pattern") {
+        if let Ok(path) = entry {
+            let f = path.file_name().unwrap().to_str().unwrap();
+            let corpus_data = read_book(f, 1);
+            let corpus_stats = statistics(corpus_data);
+            println!("{:}", corpus_stats);
+            defoe_vecs.push(corpus_stats);
+        }
+    }
+    
+    let mut other_vecs = Vec::new();
+    for entry in glob("data/corpus/[!defoe_|unknown_]*.txt").expect("Failed to read glob pattern") {
+        if let Ok(path) = entry {
+            let f = path.file_name().unwrap().to_str().unwrap();
+            let corpus_data = read_book(f, 0);
+            let corpus_stats = statistics(corpus_data);
+            println!("{:}", corpus_stats);
+            other_vecs.push(corpus_stats);
+        }
+    }
+    
+    let mut unknown_vecs = Vec::new();
+    for entry in glob("data/corpus/unknown_*.txt").expect("Failed to read glob pattern") {
+        if let Ok(path) = entry {
+            let f = path.file_name().unwrap().to_str().unwrap();
+            let corpus_data = read_book(f, 0);
+            let corpus_stats = statistics(corpus_data);
+            println!("{:}", corpus_stats);
+            unknown_vecs.push(corpus_stats);
+        }
+    }
+
+    corpus_perceptron(&defoe_vecs, &other_vecs, &unknown_vecs);
+    
+    std::process::exit(0);
+
 
     // println!("{:?}", word_frequency);
 }
